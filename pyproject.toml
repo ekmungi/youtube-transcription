@@ -1,0 +1,52 @@
+[project]
+name = "yt-transcribe"
+version = "0.1.0"
+description = "YouTube transcript extractor with MCP server, CLI, and desktop UI"
+requires-python = ">=3.12"
+dependencies = [
+    "yt-dlp",
+    "faster-whisper",
+    "assemblyai",
+    "mcp",
+    "click",
+    "rich",
+    "flet",
+    "pyyaml",
+    "tenacity",
+    "keyring",
+]
+
+[project.scripts]
+yt-transcribe = "yt_transcribe.cli:main"
+yt-transcribe-server = "yt_transcribe.mcp_server:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.1",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.15.5",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/yt_transcribe"]
