@@ -69,6 +69,57 @@ def _extract_snippet(content: str, query: str, context_chars: int = 80) -> str:
     return f"{prefix}{snippet}{suffix}"
 
 
+@dataclass(frozen=True)
+class TranscriptEntry:
+    """Metadata for a saved transcript file.
+
+    Attributes:
+        file_path: Absolute path to the markdown file.
+        title: Video title extracted from frontmatter.
+        channel: Channel name extracted from frontmatter.
+        video_id: YouTube video ID extracted from frontmatter.
+    """
+    file_path: Path
+    title: str
+    channel: str
+    video_id: str
+
+
+def list_transcripts(config: Config, folder: str | None = None) -> list[TranscriptEntry]:
+    """List all saved transcript files with metadata from frontmatter.
+
+    Scans .md files in the transcript folder (or a subfolder if specified)
+    and extracts title, channel, and video_id from YAML frontmatter.
+
+    Args:
+        config: Application configuration with vault path.
+        folder: Optional subfolder name to filter results.
+
+    Returns:
+        List of TranscriptEntry sorted alphabetically by title.
+    """
+    base = Path(config.obsidian_vault_path) / config.transcript_folder
+    if folder:
+        base = base / folder
+    if not base.exists():
+        return []
+
+    entries: list[TranscriptEntry] = []
+    for md_file in sorted(base.rglob("*.md")):
+        content = md_file.read_text(encoding="utf-8")
+        title = _extract_frontmatter_field(content, "title")
+        channel = _extract_frontmatter_field(content, "channel")
+        video_id = _extract_frontmatter_field(content, "video_id")
+        entries.append(TranscriptEntry(
+            file_path=md_file,
+            title=title,
+            channel=channel,
+            video_id=video_id,
+        ))
+
+    return entries
+
+
 def search_transcripts(config: Config, query: str) -> list[SearchResult]:
     """Search all transcript markdown files for a query string.
 
