@@ -10,3 +10,5 @@ dist/
 htmlcov/
 *.db
 PLAN.md
+build/ffmpeg/
+build/YT Transcribe/
