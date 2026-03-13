@@ -28,7 +28,7 @@ _TIMESTAMP_INTERVAL = 300  # 5 minutes
 def transcribe_video(
     video_info: VideoInfo,
     config: Config,
-    progress_callback: Callable[[float], None] | None = None,
+    phase_callback: Callable[[str], None] | None = None,
 ) -> Transcript:
     """Transcribe a video using the 3-tier cascade strategy.
 
@@ -43,7 +43,7 @@ def transcribe_video(
     Args:
         video_info: Metadata about the video to transcribe.
         config: Application configuration with strategy and model settings.
-        progress_callback: Optional callback receiving progress float (0.0 to 1.0).
+        phase_callback: Optional callback receiving status text (e.g. "downloading...").
 
     Returns:
         Immutable Transcript with formatted text and raw segments.
@@ -52,21 +52,27 @@ def transcribe_video(
         TranscriptionError: If all available transcription tiers fail.
     """
     strategy = config.transcription_strategy
+    _report = phase_callback or (lambda _: None)
 
-    # Tier 1: Try captions (AUTO only)
-    if strategy == TranscriptionStrategy.AUTO:
+    # Tier 1: Try captions (AUTO and CAPTIONS strategies)
+    if strategy in (TranscriptionStrategy.AUTO, TranscriptionStrategy.CAPTIONS):
+        _report("fetching captions...")
         segments = _try_captions(video_info.url)
         if segments is not None:
             text = _format_text(segments)
             return Transcript(video=video_info, text=text, segments=segments)
+        if strategy == TranscriptionStrategy.CAPTIONS:
+            raise TranscriptionError(
+                f"No YouTube captions available for: {video_info.title}"
+            )
 
     # Tier 2 and 3 require audio download
     if strategy == TranscriptionStrategy.AUTO:
-        segments = _try_cloud_then_local(video_info, config, progress_callback)
+        segments = _try_cloud_then_local(video_info, config, _report)
     elif strategy == TranscriptionStrategy.CLOUD:
-        segments = _try_cloud_only(video_info, config)
+        segments = _try_cloud_only(video_info, config, _report)
     elif strategy == TranscriptionStrategy.LOCAL:
-        segments = _try_local_only(video_info, config, progress_callback)
+        segments = _try_local_only(video_info, config, _report)
     else:
         raise TranscriptionError(f"Unknown strategy: {strategy}")
 
@@ -93,14 +99,14 @@ def _try_captions(url: str) -> tuple[Segment, ...] | None:
 def _try_cloud_then_local(
     video_info: VideoInfo,
     config: Config,
-    progress_callback: Callable[[float], None] | None = None,
+    report: Callable[[str], None],
 ) -> tuple[Segment, ...]:
     """Try AssemblyAI first, fall back to Whisper on failure.
 
     Args:
         video_info: Video metadata.
         config: Application configuration.
-        progress_callback: Optional progress callback.
+        report: Phase status callback.
 
     Returns:
         Tuple of Segment dataclasses.
@@ -110,28 +116,38 @@ def _try_cloud_then_local(
     """
     temp_dir = tempfile.mkdtemp(prefix="yt-transcribe-")
     try:
-        audio_path = download.download_audio(video_info.url, Path(temp_dir))
+        report("downloading audio...")
+        audio_path = download.download_audio(
+            video_info.url, Path(temp_dir), config.ffmpeg_location,
+        )
 
         # Try AssemblyAI if API key is available
         api_key = get_assemblyai_api_key()
         if api_key:
             try:
+                report("transcribing (cloud)...")
                 return assemblyai_engine.transcribe(audio_path, api_key)
             except TranscriptionError:
                 logger.warning("AssemblyAI failed for %s, falling back to Whisper", video_info.url)
 
         # Fall back to Whisper
-        return whisper_engine.transcribe(audio_path, config.whisper_model, progress_callback)
+        report("transcribing (local)...")
+        return whisper_engine.transcribe(audio_path, config.whisper_model)
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
 
-def _try_cloud_only(video_info: VideoInfo, config: Config) -> tuple[Segment, ...]:
+def _try_cloud_only(
+    video_info: VideoInfo,
+    config: Config,
+    report: Callable[[str], None],
+) -> tuple[Segment, ...]:
     """Transcribe using AssemblyAI only. Requires API key.
 
     Args:
         video_info: Video metadata.
         config: Application configuration.
+        report: Phase status callback.
 
     Returns:
         Tuple of Segment dataclasses.
@@ -145,7 +161,11 @@ def _try_cloud_only(video_info: VideoInfo, config: Config) -> tuple[Segment, ...
 
     temp_dir = tempfile.mkdtemp(prefix="yt-transcribe-")
     try:
-        audio_path = download.download_audio(video_info.url, Path(temp_dir))
+        report("downloading audio...")
+        audio_path = download.download_audio(
+            video_info.url, Path(temp_dir), config.ffmpeg_location,
+        )
+        report("transcribing (cloud)...")
         return assemblyai_engine.transcribe(audio_path, api_key)
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -154,14 +174,14 @@ def _try_cloud_only(video_info: VideoInfo, config: Config) -> tuple[Segment, ...
 def _try_local_only(
     video_info: VideoInfo,
     config: Config,
-    progress_callback: Callable[[float], None] | None = None,
+    report: Callable[[str], None],
 ) -> tuple[Segment, ...]:
     """Transcribe using local Whisper only.
 
     Args:
         video_info: Video metadata.
         config: Application configuration.
-        progress_callback: Optional progress callback.
+        report: Phase status callback.
 
     Returns:
         Tuple of Segment dataclasses.
@@ -171,8 +191,12 @@ def _try_local_only(
     """
     temp_dir = tempfile.mkdtemp(prefix="yt-transcribe-")
     try:
-        audio_path = download.download_audio(video_info.url, Path(temp_dir))
-        return whisper_engine.transcribe(audio_path, config.whisper_model, progress_callback)
+        report("downloading audio...")
+        audio_path = download.download_audio(
+            video_info.url, Path(temp_dir), config.ffmpeg_location,
+        )
+        report("transcribing (local)...")
+        return whisper_engine.transcribe(audio_path, config.whisper_model)
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -192,8 +216,8 @@ def _format_text(segments: tuple[Segment, ...]) -> str:
     if not segments:
         return ""
 
-    parts: list[str] = []
-    next_timestamp = _TIMESTAMP_INTERVAL  # First timestamp at 5:00, not 0:00
+    parts: list[str] = ["[00:00]"]
+    next_timestamp = _TIMESTAMP_INTERVAL
 
     for segment in segments:
         # Insert timestamp marker if this segment crosses a 5-minute boundary

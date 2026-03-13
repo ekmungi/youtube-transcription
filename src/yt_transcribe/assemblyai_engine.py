@@ -18,20 +18,28 @@ _MS_TO_SEC = 1000.0
 
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=4), reraise=True)
-def _submit_transcription(transcriber: aai.Transcriber, audio_path: str) -> aai.Transcript:
+def _submit_transcription(
+    transcriber: aai.Transcriber,
+    audio_path: str,
+    config: aai.TranscriptionConfig,
+) -> aai.Transcript:
     """Submit audio to AssemblyAI with retry logic.
 
     Args:
         transcriber: Configured AssemblyAI transcriber instance.
         audio_path: Path to the audio file.
+        config: Transcription configuration.
 
     Returns:
         AssemblyAI Transcript result object.
     """
-    return transcriber.transcribe(audio_path)
+    return transcriber.transcribe(audio_path, config=config)
 
 
-def transcribe(audio_path: Path, api_key: str) -> tuple[Segment, ...]:
+def transcribe(
+    audio_path: Path,
+    api_key: str,
+) -> tuple[Segment, ...]:
     """Transcribe an audio file using AssemblyAI cloud service.
 
     Uploads the audio file to AssemblyAI, waits for completion, and converts
@@ -50,10 +58,15 @@ def transcribe(audio_path: Path, api_key: str) -> tuple[Segment, ...]:
     """
     aai.settings.api_key = api_key
 
+    if not audio_path.exists():
+        raise TranscriptionError(f"Audio file not found: {audio_path}")
+
+    logger.info("Uploading %s to AssemblyAI (%d bytes)", audio_path, audio_path.stat().st_size)
+
     try:
         transcriber = aai.Transcriber()
-        config = aai.TranscriptionConfig(speaker_labels=True)
-        transcript = _submit_transcription(transcriber, str(audio_path))
+        config = aai.TranscriptionConfig(speech_models=["universal-2"])
+        transcript = _submit_transcription(transcriber, str(audio_path), config)
     except TranscriptionError:
         raise
     except Exception as exc:
@@ -64,15 +77,20 @@ def transcribe(audio_path: Path, api_key: str) -> tuple[Segment, ...]:
             f"AssemblyAI error: {transcript.error or 'Unknown error'}"
         )
 
-    utterances = transcript.utterances
-    if not utterances:
-        return ()
-
-    return tuple(
-        Segment(
-            start_seconds=u.start / _MS_TO_SEC,
-            end_seconds=u.end / _MS_TO_SEC,
-            text=u.text.strip(),
+    # Use sentences for segment boundaries (available without speaker labels)
+    sentences = transcript.get_sentences()
+    if sentences:
+        return tuple(
+            Segment(
+                start_seconds=s.start / _MS_TO_SEC,
+                end_seconds=s.end / _MS_TO_SEC,
+                text=s.text.strip(),
+            )
+            for s in sentences
         )
-        for u in utterances
-    )
+
+    # Fallback: single segment from full text
+    if transcript.text:
+        return (Segment(start_seconds=0.0, end_seconds=0.0, text=transcript.text),)
+
+    return ()

@@ -10,8 +10,10 @@ import flet as ft
 
 from ui.theme import (
     ACCENT,
-    BG_SECONDARY,
+    BG_ELEVATED,
+    BG_SURFACE,
     BODY_SIZE,
+    BORDER,
     BORDER_RADIUS,
     CAPTION_SIZE,
     ERROR,
@@ -26,7 +28,7 @@ from ui.theme import (
 def create_job_row(
     title: str,
     status: str,
-    progress: float | None = None,
+    phase: str = "",
     file_path: str | None = None,
     error_message: str | None = None,
     on_retry: Any | None = None,
@@ -36,7 +38,7 @@ def create_job_row(
     Args:
         title: Video title to display.
         status: One of "waiting", "running", "completed", "failed".
-        progress: Progress percentage (0.0 to 1.0) for running status.
+        phase: Current phase text (e.g. "downloading", "transcribing").
         file_path: Path to the saved .md file for completed status.
         error_message: Error text for failed status.
         on_retry: Callback for retry button on failed status.
@@ -44,9 +46,25 @@ def create_job_row(
     Returns:
         A Container representing one job row.
     """
+    # Status indicator dot
+    indicator_color = {
+        "waiting": WARNING,
+        "running": ACCENT,
+        "completed": SUCCESS,
+        "failed": ERROR,
+    }.get(status, TEXT_SECONDARY)
+
+    indicator = ft.Container(
+        width=8,
+        height=8,
+        border_radius=4,
+        bgcolor=indicator_color,
+    )
+
     title_text = ft.Text(
         title, size=BODY_SIZE, color=TEXT_PRIMARY,
         expand=True, max_lines=1, overflow=ft.TextOverflow.ELLIPSIS,
+        weight=ft.FontWeight.W_500,
     )
 
     # Build the trailing widget based on status
@@ -54,23 +72,20 @@ def create_job_row(
         trailing = ft.IconButton(
             icon=ft.Icons.OPEN_IN_NEW,
             icon_color=SUCCESS,
+            icon_size=16,
             tooltip="Open in Obsidian",
             on_click=lambda e: _open_file(file_path),
         )
-    elif status == "running" and progress is not None:
-        trailing = ft.Container(
-            content=ft.Row(
-                controls=[
-                    ft.ProgressBar(
-                        value=progress, color=ACCENT, bgcolor=BG_SECONDARY, width=150,
-                    ),
-                    ft.Text(
-                        f"{int(progress * 100)}%",
-                        size=CAPTION_SIZE, color=TEXT_SECONDARY,
-                    ),
-                ],
-                spacing=PADDING_SM,
-            ),
+    elif status == "running":
+        trailing = ft.Row(
+            controls=[
+                ft.ProgressRing(width=14, height=14, stroke_width=2, color=ACCENT),
+                ft.Text(
+                    phase or "processing...",
+                    size=CAPTION_SIZE, color=ACCENT, italic=True,
+                ),
+            ],
+            spacing=6,
         )
     elif status == "waiting":
         trailing = ft.Text(
@@ -87,6 +102,7 @@ def create_job_row(
                 ft.IconButton(
                     icon=ft.Icons.REFRESH,
                     icon_color=WARNING,
+                    icon_size=16,
                     tooltip="Retry",
                     on_click=lambda e: on_retry() if on_retry else None,
                 ),
@@ -98,14 +114,16 @@ def create_job_row(
 
     return ft.Container(
         content=ft.Row(
-            controls=[title_text, trailing],
+            controls=[indicator, title_text, trailing],
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
             vertical_alignment=ft.CrossAxisAlignment.CENTER,
+            spacing=12,
         ),
-        bgcolor=BG_SECONDARY,
+        bgcolor=BG_SURFACE,
+        border=ft.border.all(1, BORDER),
         border_radius=BORDER_RADIUS,
-        padding=ft.padding.symmetric(horizontal=PADDING_SM * 2, vertical=PADDING_SM),
-        margin=ft.margin.only(bottom=4),
+        padding=ft.padding.symmetric(horizontal=12, vertical=10),
+        margin=ft.margin.only(bottom=6),
     )
 
 

@@ -14,7 +14,7 @@ class VideoJob:
         title: Video title for display.
         url: Full YouTube URL.
         status: One of "waiting", "running", "completed", "failed".
-        progress: Progress percentage (0.0 to 1.0).
+        phase: Display text for current step (e.g. "downloading", "transcribing").
         file_path: Path to saved .md file (set on completion).
         error: Error message (set on failure).
     """
@@ -22,7 +22,7 @@ class VideoJob:
     title: str
     url: str
     status: str = "waiting"
-    progress: float = 0.0
+    phase: str = "waiting"
     file_path: str | None = None
     error: str | None = None
 
@@ -54,19 +54,19 @@ def add_processing_job(state: AppState, job: VideoJob) -> AppState:
     return replace(state, processing=(*state.processing, job))
 
 
-def update_job_progress(state: AppState, video_id: str, progress: float) -> AppState:
-    """Update progress for a processing job. Returns new state.
+def update_job_phase(state: AppState, video_id: str, phase: str) -> AppState:
+    """Update the phase text for a processing job. Returns new state.
 
     Args:
         state: Current application state.
         video_id: ID of the job to update.
-        progress: New progress value (0.0 to 1.0).
+        phase: Display text for current step (e.g. "downloading").
 
     Returns:
-        New AppState with updated progress.
+        New AppState with updated phase.
     """
     updated = tuple(
-        replace(j, progress=progress, status="running") if j.video_id == video_id else j
+        replace(j, phase=phase, status="running") if j.video_id == video_id else j
         for j in state.processing
     )
     return replace(state, processing=updated)
@@ -88,7 +88,7 @@ def complete_job(state: AppState, video_id: str, file_path: str) -> AppState:
         return state
 
     remaining = tuple(j for j in state.processing if j.video_id != video_id)
-    done_job = replace(job, status="completed", progress=1.0, file_path=file_path)
+    done_job = replace(job, status="completed", phase="done", file_path=file_path)
     return replace(
         state,
         processing=remaining,

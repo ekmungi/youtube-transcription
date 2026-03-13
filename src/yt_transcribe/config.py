@@ -23,6 +23,7 @@ DEFAULT_CONFIG = Config(
     whisper_model=WhisperModel.BASE,
     async_threshold_seconds=180,
     parallel_enabled=False,
+    ffmpeg_location="",
 )
 
 _FIELD_DEFAULTS: dict[str, Any] = {
@@ -32,6 +33,7 @@ _FIELD_DEFAULTS: dict[str, Any] = {
     "whisper_model": DEFAULT_CONFIG.whisper_model.value,
     "async_threshold_seconds": DEFAULT_CONFIG.async_threshold_seconds,
     "parallel_enabled": DEFAULT_CONFIG.parallel_enabled,
+    "ffmpeg_location": DEFAULT_CONFIG.ffmpeg_location,
 }
 
 
@@ -57,6 +59,9 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         parallel_enabled=bool(
             raw.get("parallel_enabled", _FIELD_DEFAULTS["parallel_enabled"])
         ),
+        ffmpeg_location=str(
+            raw.get("ffmpeg_location", _FIELD_DEFAULTS["ffmpeg_location"])
+        ),
     )
 
 
@@ -72,6 +77,7 @@ def save_config(config: Config, path: Path = CONFIG_PATH) -> None:
         "whisper_model": config.whisper_model.value,
         "async_threshold_seconds": config.async_threshold_seconds,
         "parallel_enabled": config.parallel_enabled,
+        "ffmpeg_location": config.ffmpeg_location,
     }
 
     path.write_text(yaml.dump(data, default_flow_style=False, sort_keys=False))

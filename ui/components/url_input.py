@@ -8,12 +8,15 @@ import flet as ft
 
 from ui.theme import (
     ACCENT,
-    BG_SECONDARY,
+    ACCENT_HOVER,
+    ACCENT_BLUE,
+    BG_ELEVATED,
+    BG_SURFACE,
     BODY_SIZE,
     BORDER,
     BORDER_RADIUS,
-    BUTTON_STYLE,
     PADDING_MD,
+    PADDING_SM,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
 )
@@ -38,8 +41,8 @@ def create_url_input(
         hint_style=ft.TextStyle(color=TEXT_SECONDARY, size=BODY_SIZE),
         text_style=ft.TextStyle(color=TEXT_PRIMARY, size=BODY_SIZE),
         border_color=BORDER,
-        focused_border_color=ACCENT,
-        bgcolor=BG_SECONDARY,
+        focused_border_color=ACCENT_BLUE,
+        bgcolor=BG_SURFACE,
         border_radius=BORDER_RADIUS,
     )
 
@@ -50,20 +53,69 @@ def create_url_input(
         if urls:
             on_transcribe(urls)
 
-    transcribe_btn = ft.ElevatedButton(
-        text="Transcribe",
-        style=BUTTON_STYLE,
+    def handle_clear(e: ft.ControlEvent) -> None:
+        """Clear the URL text area."""
+        url_field.value = ""
+        url_field.update()
+
+    _btn_size = 40
+
+    transcribe_btn = ft.IconButton(
+        icon=ft.Icons.EDIT_NOTE,
+        icon_size=20,
+        width=_btn_size,
+        height=_btn_size,
+        tooltip="Transcribe",
         on_click=handle_transcribe,
+        style=ft.ButtonStyle(
+            bgcolor={
+                ft.ControlState.DEFAULT: ACCENT,
+                ft.ControlState.HOVERED: ACCENT_HOVER,
+            },
+            color={"": "#FFFFFF"},
+            shape=ft.RoundedRectangleBorder(radius=BORDER_RADIUS),
+            padding=ft.padding.all(0),
+        ),
+    )
+
+    clear_btn = ft.IconButton(
+        icon=ft.Icons.BACKSPACE_OUTLINED,
+        icon_size=18,
+        width=_btn_size,
+        height=_btn_size,
+        tooltip="Clear",
+        on_click=handle_clear,
+        style=ft.ButtonStyle(
+            bgcolor={
+                ft.ControlState.DEFAULT: BG_SURFACE,
+                ft.ControlState.HOVERED: BG_ELEVATED,
+            },
+            color={
+                ft.ControlState.DEFAULT: TEXT_SECONDARY,
+                ft.ControlState.HOVERED: TEXT_PRIMARY,
+            },
+            side={ft.ControlState.DEFAULT: ft.BorderSide(1, BORDER)},
+            shape=ft.RoundedRectangleBorder(radius=BORDER_RADIUS),
+            padding=ft.padding.all(0),
+        ),
+    )
+
+    # Total height: two buttons + spacing
+    _total_height = _btn_size * 2 + PADDING_SM
+
+    button_column = ft.Column(
+        controls=[transcribe_btn, clear_btn],
+        spacing=PADDING_SM,
     )
 
     return ft.Container(
         content=ft.Row(
             controls=[
-                ft.Container(content=url_field, expand=True),
-                transcribe_btn,
+                ft.Container(content=url_field, expand=True, height=_total_height),
+                button_column,
             ],
-            vertical_alignment=ft.CrossAxisAlignment.END,
-            spacing=PADDING_MD,
+            vertical_alignment=ft.CrossAxisAlignment.START,
+            spacing=PADDING_SM,
         ),
         padding=ft.padding.all(PADDING_MD),
     )

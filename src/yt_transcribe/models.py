@@ -9,6 +9,7 @@ from enum import StrEnum
 class TranscriptionStrategy(StrEnum):
     """Available transcription strategy options."""
     AUTO = "auto"
+    CAPTIONS = "captions"
     CLOUD = "cloud"
     LOCAL = "local"
 
@@ -38,6 +39,7 @@ class Config:
     whisper_model: WhisperModel
     async_threshold_seconds: int
     parallel_enabled: bool
+    ffmpeg_location: str = ""
 
 
 @dataclass(frozen=True)

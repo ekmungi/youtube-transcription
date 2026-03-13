@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import yt_dlp
@@ -178,13 +181,57 @@ def _parse_subtitle_data(sub_data: list[dict]) -> tuple[Segment, ...]:
     return tuple(segments)
 
 
+def _resolve_ffmpeg(ffmpeg_location: str) -> str:
+    """Resolve ffmpeg location: explicit path > bundled > system PATH.
+
+    Args:
+        ffmpeg_location: User-configured path, or empty string.
+
+    Returns:
+        Path to ffmpeg binary or directory, or empty string if on PATH.
+    """
+    # User-configured path takes priority
+    if ffmpeg_location and Path(ffmpeg_location).exists():
+        return ffmpeg_location
+
+    # Check if ffmpeg is on PATH already
+    if shutil.which("ffmpeg"):
+        return ""
+
+    # Auto-detect bundled ffmpeg (PyInstaller _internal directory)
+    if getattr(sys, "frozen", False):
+        bundled = Path(sys._MEIPASS) / "ffmpeg.exe"
+        if bundled.exists():
+            return str(bundled)
+
+    # Check common Windows install locations
+    candidates = [
+        Path.home() / "AppData/Local/YT Transcribe/_internal/ffmpeg.exe",
+        Path("C:/ffmpeg/bin/ffmpeg.exe"),
+        Path("C:/Program Files/ffmpeg/bin/ffmpeg.exe"),
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            logger.info("Auto-detected ffmpeg at %s", candidate)
+            return str(candidate)
+
+    return ""
+
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=4), reraise=True)
-def download_audio(url: str, output_dir: Path) -> Path:
+def download_audio(
+    url: str,
+    output_dir: Path,
+    ffmpeg_location: str = "",
+    progress_callback: Callable[[float], None] | None = None,
+) -> Path:
     """Download audio from a YouTube video to a local directory.
 
     Args:
         url: YouTube video URL.
         output_dir: Directory to save the audio file.
+        ffmpeg_location: Path to ffmpeg binary or directory. Uses PATH if empty.
+        progress_callback: Optional callback receiving download progress (0.0 to 1.0).
 
     Returns:
         Path to the downloaded audio file.
@@ -192,6 +239,14 @@ def download_audio(url: str, output_dir: Path) -> Path:
     Raises:
         DownloadError: Network or extraction failure during download.
     """
+    def _dl_hook(d: dict) -> None:
+        """Forward yt-dlp download progress to callback."""
+        if progress_callback and d.get("status") == "downloading":
+            total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
+            downloaded = d.get("downloaded_bytes", 0)
+            if total > 0:
+                progress_callback(downloaded / total)
+
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -201,7 +256,11 @@ def download_audio(url: str, output_dir: Path) -> Path:
             "key": "FFmpegExtractAudio",
             "preferredcodec": "m4a",
         }],
+        "progress_hooks": [_dl_hook],
     }
+    resolved = _resolve_ffmpeg(ffmpeg_location)
+    if resolved:
+        opts["ffmpeg_location"] = resolved
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -213,4 +272,17 @@ def download_audio(url: str, output_dir: Path) -> Path:
     except Exception as exc:
         raise DownloadError(str(exc)) from exc
 
-    return Path(filename)
+    # prepare_filename returns the pre-postprocessor name (e.g. .webm).
+    # FFmpegExtractAudio converts to .m4a, so swap the extension.
+    audio_path = Path(filename).with_suffix(".m4a")
+    if audio_path.exists():
+        return audio_path
+
+    # Fallback: scan output_dir for any audio file matching the video ID
+    video_id = info.get("id", "")
+    for ext in (".m4a", ".mp3", ".opus", ".ogg", ".wav", ".webm"):
+        candidate = output_dir / f"{video_id}{ext}"
+        if candidate.exists():
+            return candidate
+
+    raise DownloadError(f"Audio file not found after download: {filename}")

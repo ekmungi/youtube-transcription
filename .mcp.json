@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "yt-transcribe": {
+      "command": "uv",
+      "args": ["run", "yt-transcribe-server"]
+    }
+  }
+}
