@@ -218,6 +218,9 @@ def create_settings_drawer(
     # -- Advanced -------------------------------------------------------------
 
     threshold_value = int(config_values.get("async_threshold_seconds", 180))
+    # Clamp to slider range to prevent Flet ValueError
+    threshold_max = 7200
+    threshold_value = min(max(threshold_value, 30), threshold_max)
 
     threshold_label = ft.Text(
         f"Async threshold: {threshold_value}s",
@@ -226,8 +229,8 @@ def create_settings_drawer(
 
     threshold_slider = ft.Slider(
         min=30,
-        max=600,
-        divisions=19,
+        max=threshold_max,
+        divisions=None,
         value=threshold_value,
         active_color=ACCENT_BLUE,
         on_change=lambda e: _update_threshold_label(e, threshold_label),
