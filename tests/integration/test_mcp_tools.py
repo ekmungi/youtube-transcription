@@ -161,7 +161,15 @@ class TestGetPlaylistTranscripts:
         sample_transcript: Transcript,
     ) -> None:
         """Playlist with short total duration is processed synchronously."""
+        from yt_transcribe.download import VideoData
         from yt_transcribe.mcp_server import handle_get_playlist_transcripts
+
+        video_data = VideoData(
+            video_info=sample_video,
+            captions=None,
+            audio_url="https://audio.example.com/abc123",
+            raw_info={"id": "abc123"},
+        )
 
         with (
             patch("yt_transcribe.mcp_server.load_config", return_value=sample_config),
@@ -170,8 +178,9 @@ class TestGetPlaylistTranscripts:
                 return_value=(sample_video,),
             ),
             patch("yt_transcribe.mcp_server.storage.find_existing", return_value=None),
+            patch("yt_transcribe.mcp_server.extract_video_data", return_value=video_data),
             patch(
-                "yt_transcribe.mcp_server.transcribe.transcribe_video",
+                "yt_transcribe.mcp_server.transcribe.transcribe_video_fast",
                 return_value=sample_transcript,
             ),
             patch("yt_transcribe.mcp_server.storage.save_transcript"),

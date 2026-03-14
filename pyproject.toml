@@ -1,6 +1,6 @@
 [project]
 name = "yt-transcribe"
-version = "0.2.0"
+version = "0.3.0"
 description = "YouTube transcript extractor with MCP server, CLI, and desktop UI"
 requires-python = ">=3.12"
 dependencies = [

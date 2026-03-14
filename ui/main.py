@@ -29,10 +29,10 @@ from yt_transcribe.config import (
     save_config,
     set_assemblyai_api_key,
 )
-from yt_transcribe.download import get_playlist_info, get_video_info
+from yt_transcribe.download import extract_video_data, get_playlist_info
 from yt_transcribe.models import Config, TranscriptionStrategy, WhisperModel
 from yt_transcribe.storage import find_existing, save_transcript
-from yt_transcribe.transcribe import transcribe_video
+from yt_transcribe.transcribe import transcribe_video_fast
 
 
 def main(page: ft.Page) -> None:
@@ -152,12 +152,15 @@ def main(page: ft.Page) -> None:
 
             # Resolve all URLs first
             all_videos = []
+            video_data_map = {}  # video_id -> VideoData for optimized transcription
             for url in urls:
                 try:
                     if "playlist" in url.lower():
                         all_videos.extend(get_playlist_info(url))
                     else:
-                        all_videos.append(get_video_info(url))
+                        vdata = extract_video_data(url)
+                        all_videos.append(vdata.video_info)
+                        video_data_map[vdata.video_info.video_id] = vdata
                 except Exception as e:
                     state = add_processing_job(
                         state,
@@ -194,7 +197,13 @@ def main(page: ft.Page) -> None:
                         state = update_job_phase(state, _vid_id, text)
                         refresh_ui()
 
-                    transcript = transcribe_video(vid, config, phase_callback=_on_phase)
+                    # Use pre-fetched VideoData if available, otherwise fetch now
+                    vdata = video_data_map.get(vid.video_id)
+                    if vdata is None:
+                        _on_phase("fetching video data...")
+                        vdata = extract_video_data(vid.url)
+
+                    transcript = transcribe_video_fast(vdata, config, phase_callback=_on_phase)
 
                     _on_phase("saving...")
 

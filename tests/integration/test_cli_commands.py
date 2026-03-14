@@ -73,13 +73,21 @@ class TestVideoCommand:
     ) -> None:
         """Successful transcription prints title and saves."""
         from yt_transcribe.cli import cli
+        from yt_transcribe.download import VideoData
+
+        video_data = VideoData(
+            video_info=sample_video,
+            captions=None,
+            audio_url="https://audio.example.com/abc123",
+            raw_info={"id": "abc123abcde"},
+        )
 
         with (
             patch("yt_transcribe.cli.load_config", return_value=sample_config),
-            patch("yt_transcribe.cli.download.get_video_info", return_value=sample_video),
+            patch("yt_transcribe.cli.extract_video_data", return_value=video_data),
             patch("yt_transcribe.cli.storage.find_existing", return_value=None),
             patch(
-                "yt_transcribe.cli.transcribe.transcribe_video",
+                "yt_transcribe.cli.transcribe.transcribe_video_fast",
                 return_value=sample_transcript,
             ),
             patch("yt_transcribe.cli.storage.save_transcript"),
@@ -94,10 +102,18 @@ class TestVideoCommand:
     ) -> None:
         """Already-cached transcript skips transcription."""
         from yt_transcribe.cli import cli
+        from yt_transcribe.download import VideoData
+
+        video_data = VideoData(
+            video_info=sample_video,
+            captions=None,
+            audio_url="https://audio.example.com/abc123",
+            raw_info={"id": "abc123abcde"},
+        )
 
         with (
             patch("yt_transcribe.cli.load_config", return_value=sample_config),
-            patch("yt_transcribe.cli.download.get_video_info", return_value=sample_video),
+            patch("yt_transcribe.cli.extract_video_data", return_value=video_data),
             patch("yt_transcribe.cli.storage.find_existing", return_value=Path("/v/cached.md")),
         ):
             result = runner.invoke(cli, ["video", "https://youtube.com/watch?v=abc123abcde"])
@@ -124,13 +140,22 @@ class TestPlaylistCommand:
     ) -> None:
         """Playlist processes each video."""
         from yt_transcribe.cli import cli
+        from yt_transcribe.download import VideoData
+
+        video_data = VideoData(
+            video_info=sample_video,
+            captions=None,
+            audio_url="https://audio.example.com/abc123",
+            raw_info={"id": "abc123abcde"},
+        )
 
         with (
             patch("yt_transcribe.cli.load_config", return_value=sample_config),
             patch("yt_transcribe.cli.download.get_playlist_info", return_value=(sample_video,)),
             patch("yt_transcribe.cli.storage.find_existing", return_value=None),
+            patch("yt_transcribe.cli.extract_video_data", return_value=video_data),
             patch(
-                "yt_transcribe.cli.transcribe.transcribe_video",
+                "yt_transcribe.cli.transcribe.transcribe_video_fast",
                 return_value=sample_transcript,
             ),
             patch("yt_transcribe.cli.storage.save_transcript"),

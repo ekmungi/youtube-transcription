@@ -160,7 +160,9 @@ async def handle_get_playlist_transcripts(
         if existing is not None:
             results.append({"title": video.title, "source": "cache"})
             continue
-        transcript_result = transcribe.transcribe_video(video, config)
+        # Use optimized single-call pipeline per video
+        video_data = extract_video_data(video.url)
+        transcript_result = transcribe.transcribe_video_fast(video_data, config)
         storage.save_transcript(config, transcript_result)
         results.append({
             "title": video.title,

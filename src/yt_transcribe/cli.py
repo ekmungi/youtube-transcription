@@ -11,6 +11,7 @@ from rich.table import Table
 from yt_transcribe import config as config_mod
 from yt_transcribe import download, jobs, search, storage, transcribe
 from yt_transcribe.config import load_config
+from yt_transcribe.download import extract_video_data
 from yt_transcribe.jobs import JOBS_DB_PATH
 from yt_transcribe.models import TranscriptionStrategy, WhisperModel
 
@@ -46,7 +47,8 @@ def cli() -> None:
 def video(url: str) -> None:
     """Transcribe a single YouTube video."""
     cfg = load_config()
-    video_info = download.get_video_info(url)
+    video_data = extract_video_data(url)
+    video_info = video_data.video_info
 
     existing = storage.find_existing(cfg, video_info.video_id)
     if existing is not None:
@@ -54,8 +56,8 @@ def video(url: str) -> None:
         return
 
     console.print(f"Transcribing: {video_info.title}...")
-    transcript = transcribe.transcribe_video(video_info, cfg)
-    storage.save_transcript(cfg, transcript)
+    result = transcribe.transcribe_video_fast(video_data, cfg)
+    storage.save_transcript(cfg, result)
     console.print(f"[green]Saved:[/green] {video_info.title}")
 
 
@@ -74,8 +76,10 @@ def playlist(url: str) -> None:
             continue
 
         console.print(f"  [{i}/{len(videos)}] Transcribing: {vid.title}...")
-        transcript = transcribe.transcribe_video(vid, cfg)
-        storage.save_transcript(cfg, transcript)
+        # Use optimized single-call pipeline per video
+        video_data = extract_video_data(vid.url)
+        result = transcribe.transcribe_video_fast(video_data, cfg)
+        storage.save_transcript(cfg, result)
         console.print(f"  [{i}/{len(videos)}] [green]Saved:[/green] {vid.title}")
 
 

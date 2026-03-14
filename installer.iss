@@ -2,7 +2,7 @@
 ; Compile with: iscc installer.iss
 
 #define MyAppName "YT Transcribe"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.3.0"
 #define MyAppPublisher "ekmungi"
 #define MyAppURL "https://github.com/ekmungi/youtube-transcription"
 #define MyAppExeName "YT Transcribe.exe"
