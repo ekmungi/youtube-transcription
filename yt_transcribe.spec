@@ -68,6 +68,7 @@ a_gui = Analysis(
         (str(flet_dir), "flet"),
         (str(flet_desktop_dir), "flet_desktop"),
         (str(PROJECT_ROOT / "assets" / "icon.png"), "assets"),
+        (str(PROJECT_ROOT / "assets" / "icon.ico"), "assets"),
     ],
     hiddenimports=[
         *_CORE_HIDDEN_IMPORTS,

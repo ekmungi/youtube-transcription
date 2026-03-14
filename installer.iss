@@ -51,11 +51,11 @@ Source: "scripts\register-mcp.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "scripts\unregister-mcp.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-; Start Menu shortcut (per-user)
-Name: "{userprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+; Start Menu shortcut (per-user) -- IconFilename ensures correct icon
+Name: "{userprograms}\{#MyAppName}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{userprograms}\{#MyAppName}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
 ; Desktop shortcut (optional, per-user)
-Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; IconFilename: "{app}\{#MyAppExeName}"
 
 [Run]
 ; Option to launch after install

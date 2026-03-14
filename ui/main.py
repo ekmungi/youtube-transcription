@@ -14,10 +14,21 @@ import flet as ft
 
 
 def _resolve_icon_path() -> str:
-    """Resolve the app icon path for both dev and PyInstaller-bundled modes."""
+    """Resolve the app icon path for both dev and PyInstaller-bundled modes.
+
+    Uses .ico on Windows for proper taskbar/window icon rendering,
+    falls back to .png for other platforms.
+    """
     if getattr(sys, "frozen", False):
-        return str(Path(sys._MEIPASS) / "assets" / "icon.png")
-    return str(Path(__file__).parent.parent / "assets" / "icon.png")
+        base = Path(sys._MEIPASS) / "assets"
+    else:
+        base = Path(__file__).parent.parent / "assets"
+
+    # Prefer .ico on Windows for consistent taskbar icon
+    ico_path = base / "icon.ico"
+    if ico_path.exists():
+        return str(ico_path)
+    return str(base / "icon.png")
 
 from ui.components.job_row import create_job_row
 from ui.components.settings_drawer import create_settings_drawer
