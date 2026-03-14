@@ -2,10 +2,14 @@
 
 5 tools: get_transcript, get_playlist_transcripts, list_transcripts,
 search_transcripts, check_job_status. Thin wrapper over the core library.
+
+All blocking I/O (yt-dlp, transcription, file ops) is wrapped in
+asyncio.to_thread() to avoid blocking the MCP event loop.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
@@ -76,21 +80,17 @@ def _apply_overrides(
     return config
 
 
-async def handle_get_transcript(
+def _sync_get_transcript(
     video_url: str,
     strategy: str | None = None,
     whisper_model: str | None = None,
 ) -> dict[str, Any]:
-    """Transcribe a single video using the optimized single-call pipeline.
-
-    Uses extract_video_data() for a single yt-dlp call, then passes the
-    result to transcribe_video_fast() which can use URL-based transcription
-    to skip download/upload entirely.
+    """Synchronous implementation of get_transcript (runs in thread pool).
 
     Args:
         video_url: YouTube video URL.
-        strategy: Override transcription strategy (auto, captions, cloud, local).
-        whisper_model: Override whisper model size (tiny, base, small, medium).
+        strategy: Override transcription strategy.
+        whisper_model: Override whisper model size.
 
     Returns:
         Dict with transcript text or job_id for async processing.
@@ -129,17 +129,17 @@ async def handle_get_transcript(
     }
 
 
-async def handle_get_playlist_transcripts(
+def _sync_get_playlist_transcripts(
     playlist_url: str,
     strategy: str | None = None,
     whisper_model: str | None = None,
 ) -> dict[str, Any]:
-    """Transcribe all videos in a playlist. Sync if total time is short.
+    """Synchronous implementation of get_playlist_transcripts (runs in thread pool).
 
     Args:
         playlist_url: YouTube playlist URL.
-        strategy: Override transcription strategy (auto, captions, cloud, local).
-        whisper_model: Override whisper model size (tiny, base, small, medium).
+        strategy: Override transcription strategy.
+        whisper_model: Override whisper model size.
 
     Returns:
         Dict with transcript results or job_id for async processing.
@@ -173,8 +173,8 @@ async def handle_get_playlist_transcripts(
     return {"transcripts": results}
 
 
-async def handle_list_transcripts(folder: str | None = None) -> dict[str, Any]:
-    """List all saved transcripts, optionally filtered by subfolder.
+def _sync_list_transcripts(folder: str | None = None) -> dict[str, Any]:
+    """Synchronous implementation of list_transcripts (runs in thread pool).
 
     Args:
         folder: Optional subfolder name to filter.
@@ -197,8 +197,8 @@ async def handle_list_transcripts(folder: str | None = None) -> dict[str, Any]:
     }
 
 
-async def handle_search_transcripts(query: str) -> dict[str, Any]:
-    """Full-text search across saved transcripts.
+def _sync_search_transcripts(query: str) -> dict[str, Any]:
+    """Synchronous implementation of search_transcripts (runs in thread pool).
 
     Args:
         query: Search string (case-insensitive).
@@ -221,8 +221,8 @@ async def handle_search_transcripts(query: str) -> dict[str, Any]:
     }
 
 
-async def handle_check_job_status(job_id: str) -> dict[str, Any]:
-    """Return current status and progress for a background job.
+def _sync_check_job_status(job_id: str) -> dict[str, Any]:
+    """Synchronous implementation of check_job_status (runs in thread pool).
 
     Args:
         job_id: Unique job identifier.
@@ -244,6 +244,45 @@ async def handle_check_job_status(job_id: str) -> dict[str, Any]:
         "completed_count": job["completed_count"],
         "error": job["error"],
     }
+
+
+# -- Async wrappers (run blocking I/O in thread pool) -----------------------
+
+async def handle_get_transcript(
+    video_url: str,
+    strategy: str | None = None,
+    whisper_model: str | None = None,
+) -> dict[str, Any]:
+    """Transcribe a single video. Non-blocking async wrapper."""
+    return await asyncio.to_thread(
+        _sync_get_transcript, video_url, strategy, whisper_model,
+    )
+
+
+async def handle_get_playlist_transcripts(
+    playlist_url: str,
+    strategy: str | None = None,
+    whisper_model: str | None = None,
+) -> dict[str, Any]:
+    """Transcribe all videos in a playlist. Non-blocking async wrapper."""
+    return await asyncio.to_thread(
+        _sync_get_playlist_transcripts, playlist_url, strategy, whisper_model,
+    )
+
+
+async def handle_list_transcripts(folder: str | None = None) -> dict[str, Any]:
+    """List saved transcripts. Non-blocking async wrapper."""
+    return await asyncio.to_thread(_sync_list_transcripts, folder)
+
+
+async def handle_search_transcripts(query: str) -> dict[str, Any]:
+    """Search transcripts. Non-blocking async wrapper."""
+    return await asyncio.to_thread(_sync_search_transcripts, query)
+
+
+async def handle_check_job_status(job_id: str) -> dict[str, Any]:
+    """Check job status. Non-blocking async wrapper."""
+    return await asyncio.to_thread(_sync_check_job_status, job_id)
 
 
 # -- MCP server wiring -------------------------------------------------------
@@ -385,8 +424,6 @@ async def _run_server() -> None:
 
 def main() -> None:
     """Entry point for yt-transcribe-server."""
-    import asyncio
-
     asyncio.run(_run_server())
 
 
