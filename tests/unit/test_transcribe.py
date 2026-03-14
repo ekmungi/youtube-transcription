@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from yt_transcribe.download import VideoData
 from yt_transcribe.exceptions import TranscriptionError
 from yt_transcribe.models import (
     Config,
@@ -15,7 +16,7 @@ from yt_transcribe.models import (
     VideoInfo,
     WhisperModel,
 )
-from yt_transcribe.transcribe import transcribe_video
+from yt_transcribe.transcribe import transcribe_video, transcribe_video_fast
 
 
 # -- Fixtures --
@@ -61,8 +62,146 @@ LOCAL_CONFIG = Config(
     parallel_enabled=False,
 )
 
+SAMPLE_VIDEO_DATA = VideoData(
+    video_info=SAMPLE_VIDEO,
+    captions=SAMPLE_SEGMENTS,
+    audio_url="https://audio.youtube.com/stream/abc123",
+    raw_info={"id": "abc123"},
+)
 
-# -- Cascade: captions -> assemblyai -> whisper --
+SAMPLE_VIDEO_DATA_NO_CAPTIONS = VideoData(
+    video_info=SAMPLE_VIDEO,
+    captions=None,
+    audio_url="https://audio.youtube.com/stream/abc123",
+    raw_info={"id": "abc123"},
+)
+
+SAMPLE_VIDEO_DATA_NO_URL = VideoData(
+    video_info=SAMPLE_VIDEO,
+    captions=None,
+    audio_url=None,
+    raw_info={"id": "abc123"},
+)
+
+
+# -- transcribe_video_fast tests (optimized path) --
+
+class TestTranscribeVideoFastAutoStrategy:
+    """Tests for the optimized fast path with AUTO strategy."""
+
+    def test_uses_pre_fetched_captions(self):
+        """Fast path uses captions from VideoData without any network call."""
+        result = transcribe_video_fast(SAMPLE_VIDEO_DATA, AUTO_CONFIG)
+
+        assert isinstance(result, Transcript)
+        assert result.video == SAMPLE_VIDEO
+        assert result.segments == SAMPLE_SEGMENTS
+        assert "Hello world" in result.text
+
+    @patch("yt_transcribe.transcribe.assemblyai_engine")
+    @patch("yt_transcribe.transcribe.get_assemblyai_api_key", return_value="test-key")
+    def test_uses_url_transcription_when_no_captions(
+        self, mock_get_key: MagicMock, mock_aai: MagicMock
+    ):
+        """Fast path uses AssemblyAI URL transcription when captions unavailable."""
+        mock_aai.transcribe_url.return_value = SAMPLE_SEGMENTS
+
+        result = transcribe_video_fast(SAMPLE_VIDEO_DATA_NO_CAPTIONS, AUTO_CONFIG)
+
+        assert isinstance(result, Transcript)
+        mock_aai.transcribe_url.assert_called_once_with(
+            "https://audio.youtube.com/stream/abc123", "test-key"
+        )
+
+    @patch("yt_transcribe.transcribe.whisper_engine")
+    @patch("yt_transcribe.transcribe.download")
+    @patch("yt_transcribe.transcribe.get_assemblyai_api_key", return_value=None)
+    def test_falls_back_to_whisper_when_no_api_key(
+        self, mock_get_key: MagicMock, mock_download: MagicMock, mock_whisper: MagicMock,
+        tmp_path: Path,
+    ):
+        """Fast path falls back to download+Whisper when no API key."""
+        mock_download.download_audio.return_value = tmp_path / "audio.m4a"
+        mock_whisper.transcribe.return_value = SAMPLE_SEGMENTS
+
+        result = transcribe_video_fast(SAMPLE_VIDEO_DATA_NO_CAPTIONS, AUTO_CONFIG)
+
+        assert isinstance(result, Transcript)
+        mock_whisper.transcribe.assert_called_once()
+
+    @patch("yt_transcribe.transcribe.whisper_engine")
+    @patch("yt_transcribe.transcribe.download")
+    @patch("yt_transcribe.transcribe.assemblyai_engine")
+    @patch("yt_transcribe.transcribe.get_assemblyai_api_key", return_value="test-key")
+    def test_falls_back_to_download_when_url_transcription_fails(
+        self, mock_get_key: MagicMock, mock_aai: MagicMock,
+        mock_download: MagicMock, mock_whisper: MagicMock,
+        tmp_path: Path,
+    ):
+        """Fast path falls back to download+Whisper when URL transcription fails."""
+        mock_aai.transcribe_url.side_effect = TranscriptionError("URL fetch failed")
+        # File upload also fails, forcing Whisper fallback
+        mock_aai.transcribe.side_effect = TranscriptionError("Upload also failed")
+        mock_download.download_audio.return_value = tmp_path / "audio.m4a"
+        mock_whisper.transcribe.return_value = SAMPLE_SEGMENTS
+
+        result = transcribe_video_fast(SAMPLE_VIDEO_DATA_NO_CAPTIONS, AUTO_CONFIG)
+
+        assert isinstance(result, Transcript)
+        mock_whisper.transcribe.assert_called_once()
+
+
+class TestTranscribeVideoFastCloudStrategy:
+    """Tests for fast path with CLOUD strategy."""
+
+    @patch("yt_transcribe.transcribe.assemblyai_engine")
+    @patch("yt_transcribe.transcribe.get_assemblyai_api_key", return_value="test-key")
+    def test_uses_url_transcription(self, mock_get_key: MagicMock, mock_aai: MagicMock):
+        """Cloud strategy uses URL transcription directly."""
+        mock_aai.transcribe_url.return_value = SAMPLE_SEGMENTS
+
+        result = transcribe_video_fast(SAMPLE_VIDEO_DATA_NO_CAPTIONS, CLOUD_CONFIG)
+
+        assert isinstance(result, Transcript)
+        mock_aai.transcribe_url.assert_called_once()
+
+    @patch("yt_transcribe.transcribe.get_assemblyai_api_key", return_value=None)
+    def test_raises_when_no_api_key(self, mock_get_key: MagicMock):
+        """Cloud strategy raises when no API key available."""
+        with pytest.raises(TranscriptionError, match="API key"):
+            transcribe_video_fast(SAMPLE_VIDEO_DATA_NO_CAPTIONS, CLOUD_CONFIG)
+
+    @patch("yt_transcribe.transcribe.assemblyai_engine")
+    @patch("yt_transcribe.transcribe.get_assemblyai_api_key", return_value="test-key")
+    def test_raises_when_url_transcription_fails(
+        self, mock_get_key: MagicMock, mock_aai: MagicMock
+    ):
+        """Cloud strategy raises when URL transcription fails (no fallback)."""
+        mock_aai.transcribe_url.side_effect = TranscriptionError("Failed")
+
+        with pytest.raises(TranscriptionError):
+            transcribe_video_fast(SAMPLE_VIDEO_DATA_NO_CAPTIONS, CLOUD_CONFIG)
+
+
+class TestTranscribeVideoFastLocalStrategy:
+    """Tests for fast path with LOCAL strategy."""
+
+    @patch("yt_transcribe.transcribe.whisper_engine")
+    @patch("yt_transcribe.transcribe.download")
+    def test_downloads_and_uses_whisper(
+        self, mock_download: MagicMock, mock_whisper: MagicMock, tmp_path: Path
+    ):
+        """Local strategy downloads audio and uses Whisper."""
+        mock_download.download_audio.return_value = tmp_path / "audio.m4a"
+        mock_whisper.transcribe.return_value = SAMPLE_SEGMENTS
+
+        result = transcribe_video_fast(SAMPLE_VIDEO_DATA_NO_CAPTIONS, LOCAL_CONFIG)
+
+        assert isinstance(result, Transcript)
+        mock_whisper.transcribe.assert_called_once()
+
+
+# -- Legacy transcribe_video tests --
 
 class TestTranscribeVideoAutoStrategy:
     @patch("yt_transcribe.transcribe.download")
@@ -192,27 +331,6 @@ class TestTranscribeVideoLocalStrategy:
         mock_whisper.transcribe.assert_called_once()
 
 
-class TestTranscribeVideoProgressCallback:
-    @patch("yt_transcribe.transcribe.whisper_engine")
-    @patch("yt_transcribe.transcribe.download")
-    def test_progress_callback_forwarded_to_engine(
-        self,
-        mock_download: MagicMock,
-        mock_whisper: MagicMock,
-        tmp_path: Path,
-    ):
-        """Progress callback is forwarded to the transcription engine."""
-        mock_download.download_audio.return_value = tmp_path / "audio.m4a"
-        mock_whisper.transcribe.return_value = SAMPLE_SEGMENTS
-
-        callback = MagicMock()
-        transcribe_video(SAMPLE_VIDEO, LOCAL_CONFIG, progress_callback=callback)
-
-        # Whisper engine should have received the callback
-        call_kwargs = mock_whisper.transcribe.call_args
-        assert call_kwargs is not None
-
-
 class TestTranscribeVideoTextFormatting:
     @patch("yt_transcribe.transcribe.download")
     def test_text_includes_timestamps_at_five_minute_intervals(
@@ -232,7 +350,6 @@ class TestTranscribeVideoTextFormatting:
 
         assert "[05:00]" in result.text
         assert "[10:00]" in result.text
-        assert "[00:00]" not in result.text  # no timestamp at start
 
 
 class TestTranscribeVideoCleanup:

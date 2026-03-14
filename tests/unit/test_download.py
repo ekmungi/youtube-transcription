@@ -6,13 +6,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from yt_transcribe.download import (
+    VideoData,
+    _extract_audio_url,
+    _extract_captions_from_info,
     download_audio,
+    extract_video_data,
     get_captions,
     get_playlist_info,
     get_video_info,
 )
 from yt_transcribe.exceptions import (
-    CaptionNotFoundError,
     DownloadError,
     PlaylistNotFoundError,
     VideoNotFoundError,
@@ -217,3 +220,146 @@ class TestDownloadAudio:
 
         with pytest.raises(DownloadError):
             download_audio("https://www.youtube.com/watch?v=abc123", tmp_path)
+
+
+# -- extract_video_data tests (single-call optimization) --
+
+SAMPLE_INFO_WITH_SUBS = {
+    **SAMPLE_INFO_DICT,
+    "formats": [
+        {"format_id": "251", "acodec": "opus", "vcodec": "none", "abr": 128, "url": "https://audio.example.com/251"},
+        {"format_id": "140", "acodec": "mp4a", "vcodec": "none", "abr": 96, "url": "https://audio.example.com/140"},
+    ],
+    "requested_subtitles": {
+        "en": {
+            "ext": "json3",
+            "data": [
+                {"start": 0.0, "duration": 5.0, "text": "Hello world"},
+                {"start": 5.0, "duration": 3.0, "text": "Second line"},
+            ],
+        }
+    },
+}
+
+
+class TestExtractVideoData:
+    """Tests for the single-call extract_video_data function."""
+
+    @patch("yt_transcribe.download.yt_dlp.YoutubeDL")
+    def test_returns_video_data_with_all_fields(self, mock_ydl_cls: MagicMock):
+        """extract_video_data returns VideoData with metadata, captions, and audio URL."""
+        mock_ydl = MagicMock()
+        mock_ydl_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_ydl.extract_info.return_value = SAMPLE_INFO_WITH_SUBS
+
+        result = extract_video_data("https://www.youtube.com/watch?v=abc123")
+
+        assert isinstance(result, VideoData)
+        assert result.video_info.video_id == "abc123"
+        assert result.captions is not None
+        assert len(result.captions) == 2
+        assert result.audio_url == "https://audio.example.com/251"  # highest abr
+
+    @patch("yt_transcribe.download.yt_dlp.YoutubeDL")
+    def test_returns_none_captions_when_no_subs(self, mock_ydl_cls: MagicMock):
+        """extract_video_data returns None captions when video has no subtitles."""
+        mock_ydl = MagicMock()
+        mock_ydl_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_cls.return_value.__exit__ = MagicMock(return_value=False)
+        info_no_subs = {**SAMPLE_INFO_DICT, "requested_subtitles": None, "formats": []}
+        mock_ydl.extract_info.return_value = info_no_subs
+
+        result = extract_video_data("https://www.youtube.com/watch?v=abc123")
+
+        assert result.captions is None
+
+    @patch("yt_transcribe.download.yt_dlp.YoutubeDL")
+    def test_raises_video_not_found(self, mock_ydl_cls: MagicMock):
+        """extract_video_data raises VideoNotFoundError on missing video."""
+        mock_ydl = MagicMock()
+        mock_ydl_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_ydl.extract_info.side_effect = Exception("Video not found")
+
+        with pytest.raises(VideoNotFoundError):
+            extract_video_data("https://www.youtube.com/watch?v=missing")
+
+    @patch("yt_transcribe.download.yt_dlp.YoutubeDL")
+    def test_raises_video_unavailable_for_private(self, mock_ydl_cls: MagicMock):
+        """extract_video_data raises VideoUnavailableError for private videos."""
+        mock_ydl = MagicMock()
+        mock_ydl_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_ydl.extract_info.side_effect = Exception("Private video")
+
+        with pytest.raises(VideoUnavailableError):
+            extract_video_data("https://www.youtube.com/watch?v=private")
+
+    @patch("yt_transcribe.download.yt_dlp.YoutubeDL")
+    def test_single_extract_info_call(self, mock_ydl_cls: MagicMock):
+        """extract_video_data makes exactly one extract_info call."""
+        mock_ydl = MagicMock()
+        mock_ydl_cls.return_value.__enter__ = MagicMock(return_value=mock_ydl)
+        mock_ydl_cls.return_value.__exit__ = MagicMock(return_value=False)
+        mock_ydl.extract_info.return_value = SAMPLE_INFO_WITH_SUBS
+
+        extract_video_data("https://www.youtube.com/watch?v=abc123")
+
+        mock_ydl.extract_info.assert_called_once()
+
+
+class TestExtractAudioUrl:
+    """Tests for _extract_audio_url helper."""
+
+    def test_picks_highest_bitrate_audio(self):
+        """Selects audio format with highest abr."""
+        info = {
+            "formats": [
+                {"acodec": "opus", "vcodec": "none", "abr": 64, "url": "https://low.com"},
+                {"acodec": "opus", "vcodec": "none", "abr": 128, "url": "https://high.com"},
+            ]
+        }
+        assert _extract_audio_url(info) == "https://high.com"
+
+    def test_returns_none_for_no_formats(self):
+        """Returns None when no formats available."""
+        assert _extract_audio_url({"formats": []}) is None
+
+    def test_fallback_to_format_with_video(self):
+        """Falls back to video+audio format when no audio-only available."""
+        info = {
+            "formats": [
+                {"acodec": "mp4a", "vcodec": "h264", "abr": 128, "url": "https://mixed.com"},
+            ]
+        }
+        assert _extract_audio_url(info) == "https://mixed.com"
+
+
+class TestExtractCaptionsFromInfo:
+    """Tests for _extract_captions_from_info helper."""
+
+    def test_returns_segments_from_subtitle_data(self):
+        """Extracts caption segments from info dict."""
+        info = {
+            "requested_subtitles": {
+                "en": {
+                    "data": [
+                        {"start": 0.0, "duration": 5.0, "text": "Hello"},
+                    ]
+                }
+            }
+        }
+        result = _extract_captions_from_info(info)
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].text == "Hello"
+
+    def test_returns_none_when_no_subtitles(self):
+        """Returns None when no requested_subtitles in info."""
+        assert _extract_captions_from_info({"requested_subtitles": None}) is None
+
+    def test_returns_none_when_no_english(self):
+        """Returns None when no English subtitles available."""
+        info = {"requested_subtitles": {"fr": {"data": [{"start": 0, "duration": 1, "text": "Bonjour"}]}}}
+        assert _extract_captions_from_info(info) is None

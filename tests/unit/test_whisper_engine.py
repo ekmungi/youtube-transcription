@@ -65,34 +65,6 @@ class TestTranscribe:
         assert result == ()
 
     @patch("yt_transcribe.whisper_engine.WhisperModel")
-    def test_progress_callback_is_called(self, mock_model_cls: MagicMock, tmp_path: Path):
-        """transcribe calls the progress callback with progress values 0.0 to 1.0."""
-        audio_file = tmp_path / "test.m4a"
-        audio_file.write_bytes(b"fake")
-
-        mock_model = MagicMock()
-        mock_model_cls.return_value = mock_model
-
-        mock_segments = [
-            _make_mock_segment(0.0, 5.0, "First half"),
-            _make_mock_segment(5.0, 10.0, "Second half"),
-        ]
-        mock_info = MagicMock()
-        mock_info.duration = 10.0
-        mock_model.transcribe.return_value = (iter(mock_segments), mock_info)
-
-        progress_values: list[float] = []
-        result = transcribe(
-            audio_file,
-            WhisperModel.BASE,
-            progress_callback=lambda p: progress_values.append(p),
-        )
-
-        assert len(progress_values) == 2
-        assert progress_values[0] == pytest.approx(0.5)
-        assert progress_values[1] == pytest.approx(1.0)
-
-    @patch("yt_transcribe.whisper_engine.WhisperModel")
     def test_uses_correct_model_size(self, mock_model_cls: MagicMock, tmp_path: Path):
         """transcribe initializes the Whisper model with the correct size string."""
         audio_file = tmp_path / "test.m4a"

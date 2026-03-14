@@ -140,8 +140,9 @@ def _transcript_folder_path(config: Config) -> Path:
 def find_existing(config: Config, video_id: str) -> Path | None:
     """Search for an existing transcript markdown file by video_id.
 
-    Scans all .md files in the transcript folder and checks frontmatter
-    for a matching video_id field.
+    Uses fast glob-based lookup first (matching [video_id] in filename),
+    then falls back to frontmatter scan for backward compatibility with
+    files saved before the naming convention change.
 
     Args:
         config: Application configuration.
@@ -154,20 +155,45 @@ def find_existing(config: Config, video_id: str) -> Path | None:
     if not folder.exists():
         return None
 
+    # Fast path: glob for files with video_id in filename
+    pattern = f"*[{video_id}]*.md"
+    matches = list(folder.rglob(pattern))
+    if matches:
+        return matches[0]
+
+    # Slow fallback: scan frontmatter for legacy files without video_id in name
     target = f'video_id: "{video_id}"'
     for md_file in folder.rglob("*.md"):
-        content = md_file.read_text(encoding="utf-8")
+        # Only read first 512 bytes (frontmatter) instead of full file
+        content = md_file.read_text(encoding="utf-8")[:512]
         if target in content:
             return md_file
 
     return None
 
 
+def _build_filename(title: str, video_id: str) -> str:
+    """Build a filename with video_id embedded for fast lookup.
+
+    Format: {sanitized_title} [{video_id}].md
+
+    Args:
+        title: Video title.
+        video_id: YouTube video ID.
+
+    Returns:
+        Filename string with .md extension.
+    """
+    safe_title = sanitize_filename(title)
+    return f"{safe_title} [{video_id}].md"
+
+
 def save_transcript(config: Config, transcript: Transcript) -> Path:
     """Save a transcript as a markdown file to the Obsidian vault.
 
-    Single videos go to {vault}/{folder}/{title}.md.
-    Playlist videos go to {vault}/{folder}/{playlist_name}/{title}.md.
+    Filename format: {title} [{video_id}].md for fast deduplication lookup.
+    Single videos go to {vault}/{folder}/{title} [{video_id}].md.
+    Playlist videos go to {vault}/{folder}/{playlist_name}/{title} [{video_id}].md.
     Deduplicates by video_id -- returns existing path if already saved.
 
     Args:
@@ -190,7 +216,7 @@ def save_transcript(config: Config, transcript: Transcript) -> Path:
 
     folder.mkdir(parents=True, exist_ok=True)
 
-    filename = sanitize_filename(transcript.video.title) + ".md"
+    filename = _build_filename(transcript.video.title, transcript.video.video_id)
     file_path = folder / filename
 
     markdown = format_markdown(transcript)

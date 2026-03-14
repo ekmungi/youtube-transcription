@@ -13,6 +13,7 @@ from yt_transcribe.models import (
     WhisperModel,
 )
 from yt_transcribe.storage import (
+    _build_filename,
     find_existing,
     format_markdown,
     sanitize_filename,
@@ -139,6 +140,21 @@ class TestFormatMarkdown:
         assert 'duration: "2:03:04"' in md
 
 
+class TestBuildFilename:
+    """Tests for the _build_filename helper."""
+
+    def test_includes_video_id_in_brackets(self):
+        """Filename includes [video_id] for fast glob lookup."""
+        result = _build_filename("Test Video", "abc123")
+        assert result == "Test Video [abc123].md"
+
+    def test_sanitizes_title(self):
+        """Title is sanitized in the filename."""
+        result = _build_filename("What is AI? Part 1/2", "xyz789")
+        assert "?" not in result
+        assert "[xyz789].md" in result
+
+
 class TestSaveTranscript:
     def test_creates_markdown_file(self, tmp_path: Path):
         config = _make_config(tmp_path)
@@ -154,6 +170,13 @@ class TestSaveTranscript:
         result = save_transcript(config, transcript)
         expected_dir = Path(config.obsidian_vault_path) / config.transcript_folder
         assert result.parent == expected_dir
+
+    def test_filename_includes_video_id(self, tmp_path: Path):
+        """Saved filename includes [video_id] for fast lookup."""
+        config = _make_config(tmp_path)
+        transcript = _make_transcript()
+        result = save_transcript(config, transcript)
+        assert "[abc123]" in result.name
 
     def test_playlist_video_in_subfolder(self, tmp_path: Path):
         config = _make_config(tmp_path)
@@ -203,3 +226,18 @@ class TestFindExisting:
         folder = Path(config.obsidian_vault_path) / config.transcript_folder
         md_files = list(folder.glob("*.md"))
         assert len(md_files) == 1
+
+    def test_finds_legacy_file_without_video_id_in_name(self, tmp_path: Path):
+        """Falls back to frontmatter scan for files without [video_id] in name."""
+        config = _make_config(tmp_path)
+        folder = Path(config.obsidian_vault_path) / config.transcript_folder
+        folder.mkdir(parents=True)
+        # Write a legacy-format file (no video_id in filename)
+        legacy_file = folder / "Old Video.md"
+        legacy_file.write_text(
+            '---\nvideo_id: "legacy123"\n---\nContent here\n',
+            encoding="utf-8",
+        )
+
+        found = find_existing(config, "legacy123")
+        assert found == legacy_file

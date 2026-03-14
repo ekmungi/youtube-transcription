@@ -14,9 +14,13 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from dataclasses import replace
+
 from yt_transcribe import download, jobs, search, storage, transcribe
 from yt_transcribe.config import load_config
+from yt_transcribe.download import extract_video_data
 from yt_transcribe.jobs import JOBS_DB_PATH
+from yt_transcribe.models import TranscriptionStrategy, WhisperModel
 
 # Rough estimate: 1s processing per 1s of audio
 _SYNC_ESTIMATE_RATIO = 1.0
@@ -49,16 +53,49 @@ def _get_db():
     return jobs.get_or_create_db(JOBS_DB_PATH)
 
 
-async def handle_get_transcript(video_url: str) -> dict[str, Any]:
-    """Transcribe a single video. Sync if fast, async with job_id if slow.
+def _apply_overrides(
+    strategy: str | None = None,
+    whisper_model: str | None = None,
+) -> "Config":
+    """Load config and apply optional per-call overrides.
+
+    Args:
+        strategy: Override transcription strategy (auto, captions, cloud, local).
+        whisper_model: Override whisper model size (tiny, base, small, medium).
+
+    Returns:
+        Config with overrides applied.
+    """
+    from yt_transcribe.models import Config
+
+    config = load_config()
+    if strategy:
+        config = replace(config, transcription_strategy=TranscriptionStrategy(strategy))
+    if whisper_model:
+        config = replace(config, whisper_model=WhisperModel(whisper_model))
+    return config
+
+
+async def handle_get_transcript(
+    video_url: str,
+    strategy: str | None = None,
+    whisper_model: str | None = None,
+) -> dict[str, Any]:
+    """Transcribe a single video using the optimized single-call pipeline.
+
+    Uses extract_video_data() for a single yt-dlp call, then passes the
+    result to transcribe_video_fast() which can use URL-based transcription
+    to skip download/upload entirely.
 
     Args:
         video_url: YouTube video URL.
+        strategy: Override transcription strategy (auto, captions, cloud, local).
+        whisper_model: Override whisper model size (tiny, base, small, medium).
 
     Returns:
         Dict with transcript text or job_id for async processing.
     """
-    config = load_config()
+    config = _apply_overrides(strategy, whisper_model)
 
     # Cache-first: check Obsidian vault by video_id
     video_id = _extract_video_id(video_url)
@@ -67,7 +104,9 @@ async def handle_get_transcript(video_url: str) -> dict[str, Any]:
         if existing_path is not None:
             return {"video_id": video_id, "source": "cache", "path": str(existing_path)}
 
-    video = download.get_video_info(video_url)
+    # Single yt-dlp call: metadata + captions + audio URL
+    video_data = extract_video_data(video_url)
+    video = video_data.video_info
     estimated_seconds = video.duration_seconds * _SYNC_ESTIMATE_RATIO
 
     if estimated_seconds > config.async_threshold_seconds:
@@ -80,25 +119,32 @@ async def handle_get_transcript(video_url: str) -> dict[str, Any]:
             "estimated_seconds": estimated_seconds,
         }
 
-    transcript = transcribe.transcribe_video(video, config)
-    storage.save_transcript(config, transcript)
+    # Use optimized fast path with pre-fetched data
+    transcript_result = transcribe.transcribe_video_fast(video_data, config)
+    storage.save_transcript(config, transcript_result)
     return {
-        "text": transcript.text,
+        "text": transcript_result.text,
         "source": "transcribed",
         "title": video.title,
     }
 
 
-async def handle_get_playlist_transcripts(playlist_url: str) -> dict[str, Any]:
+async def handle_get_playlist_transcripts(
+    playlist_url: str,
+    strategy: str | None = None,
+    whisper_model: str | None = None,
+) -> dict[str, Any]:
     """Transcribe all videos in a playlist. Sync if total time is short.
 
     Args:
         playlist_url: YouTube playlist URL.
+        strategy: Override transcription strategy (auto, captions, cloud, local).
+        whisper_model: Override whisper model size (tiny, base, small, medium).
 
     Returns:
         Dict with transcript results or job_id for async processing.
     """
-    config = load_config()
+    config = _apply_overrides(strategy, whisper_model)
     videos = download.get_playlist_info(playlist_url)
     total_estimate = sum(v.duration_seconds * _SYNC_ESTIMATE_RATIO for v in videos)
 
@@ -208,6 +254,16 @@ _TOOLS = (
             "type": "object",
             "properties": {
                 "video_url": {"type": "string", "description": "YouTube video URL"},
+                "strategy": {
+                    "type": "string",
+                    "description": "Transcription strategy override: auto, captions, cloud, local",
+                    "enum": ["auto", "captions", "cloud", "local"],
+                },
+                "whisper_model": {
+                    "type": "string",
+                    "description": "Whisper model size override (for local strategy): tiny, base, small, medium",
+                    "enum": ["tiny", "base", "small", "medium"],
+                },
             },
             "required": ["video_url"],
         },
@@ -219,6 +275,16 @@ _TOOLS = (
             "type": "object",
             "properties": {
                 "playlist_url": {"type": "string", "description": "YouTube playlist URL"},
+                "strategy": {
+                    "type": "string",
+                    "description": "Transcription strategy override: auto, captions, cloud, local",
+                    "enum": ["auto", "captions", "cloud", "local"],
+                },
+                "whisper_model": {
+                    "type": "string",
+                    "description": "Whisper model size override (for local strategy): tiny, base, small, medium",
+                    "enum": ["tiny", "base", "small", "medium"],
+                },
             },
             "required": ["playlist_url"],
         },
@@ -258,9 +324,11 @@ _TOOLS = (
 )
 
 _TOOL_HANDLERS: dict[str, Any] = {
-    "get_transcript": lambda args: handle_get_transcript(args["video_url"]),
+    "get_transcript": lambda args: handle_get_transcript(
+        args["video_url"], args.get("strategy"), args.get("whisper_model"),
+    ),
     "get_playlist_transcripts": lambda args: handle_get_playlist_transcripts(
-        args["playlist_url"]
+        args["playlist_url"], args.get("strategy"), args.get("whisper_model"),
     ),
     "list_transcripts": lambda args: handle_list_transcripts(args.get("folder")),
     "search_transcripts": lambda args: handle_search_transcripts(args["query"]),

@@ -88,14 +88,22 @@ class TestGetTranscript:
         sample_transcript: Transcript,
     ) -> None:
         """Short video is transcribed synchronously and returned inline."""
+        from yt_transcribe.download import VideoData
         from yt_transcribe.mcp_server import handle_get_transcript
+
+        video_data = VideoData(
+            video_info=sample_video,
+            captions=None,
+            audio_url="https://audio.example.com/abc123",
+            raw_info={"id": "abc123"},
+        )
 
         with (
             patch("yt_transcribe.mcp_server.load_config", return_value=sample_config),
             patch("yt_transcribe.mcp_server.storage.find_existing", return_value=None),
-            patch("yt_transcribe.mcp_server.download.get_video_info", return_value=sample_video),
+            patch("yt_transcribe.mcp_server.extract_video_data", return_value=video_data),
             patch(
-                "yt_transcribe.mcp_server.transcribe.transcribe_video",
+                "yt_transcribe.mcp_server.transcribe.transcribe_video_fast",
                 return_value=sample_transcript,
             ),
             patch("yt_transcribe.mcp_server.storage.save_transcript") as mock_save,
@@ -109,6 +117,7 @@ class TestGetTranscript:
     @pytest.mark.asyncio()
     async def test_async_job_for_long_video(self, sample_config: Config) -> None:
         """Long video exceeding threshold returns a job_id."""
+        from yt_transcribe.download import VideoData
         from yt_transcribe.mcp_server import handle_get_transcript
 
         long_video = VideoInfo(
@@ -119,11 +128,17 @@ class TestGetTranscript:
             duration_seconds=7200,
             playlist_title=None,
         )
+        video_data = VideoData(
+            video_info=long_video,
+            captions=None,
+            audio_url="https://audio.example.com/long1",
+            raw_info={"id": "long1"},
+        )
         mock_conn = MagicMock()
         with (
             patch("yt_transcribe.mcp_server.load_config", return_value=sample_config),
             patch("yt_transcribe.mcp_server.storage.find_existing", return_value=None),
-            patch("yt_transcribe.mcp_server.download.get_video_info", return_value=long_video),
+            patch("yt_transcribe.mcp_server.extract_video_data", return_value=video_data),
             patch("yt_transcribe.mcp_server._get_db", return_value=mock_conn),
             patch("yt_transcribe.mcp_server.jobs.create_job", return_value="job-001"),
         ):
