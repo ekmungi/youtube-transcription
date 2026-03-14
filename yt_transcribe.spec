@@ -67,6 +67,7 @@ a_gui = Analysis(
     datas=[
         (str(flet_dir), "flet"),
         (str(flet_desktop_dir), "flet_desktop"),
+        (str(PROJECT_ROOT / "assets" / "icon.png"), "assets"),
     ],
     hiddenimports=[
         *_CORE_HIDDEN_IMPORTS,
@@ -113,7 +114,7 @@ exe_gui = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon=str(PROJECT_ROOT / "assets" / "icon.ico"),
+    icon=str(PROJECT_ROOT / "assets" / "icon.ico"),
 )
 
 # ---------------------------------------------------------------------------

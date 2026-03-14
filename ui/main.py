@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 from dataclasses import replace
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s: %(message)s")
 
 import flet as ft
+
+
+def _resolve_icon_path() -> str:
+    """Resolve the app icon path for both dev and PyInstaller-bundled modes."""
+    if getattr(sys, "frozen", False):
+        return str(Path(sys._MEIPASS) / "assets" / "icon.png")
+    return str(Path(__file__).parent.parent / "assets" / "icon.png")
 
 from ui.components.job_row import create_job_row
 from ui.components.settings_drawer import create_settings_drawer
@@ -41,8 +50,9 @@ def main(page: ft.Page) -> None:
     Args:
         page: The Flet page instance.
     """
-    # Window setup: custom chrome
+    # Window setup: custom chrome + icon
     page.title = "YT Transcribe"
+    page.window.icon = _resolve_icon_path()
     page.window.title_bar_hidden = True
     page.window.width = 700
     page.window.height = 600

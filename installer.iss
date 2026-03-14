@@ -29,6 +29,9 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=commandline
 ; Modern installer look
 WizardStyle=modern
+; App icon
+SetupIconFile=assets\icon.ico
+UninstallDisplayIcon={app}\YT Transcribe.exe
 ; Minimum Windows 10
 MinVersion=10.0
 
