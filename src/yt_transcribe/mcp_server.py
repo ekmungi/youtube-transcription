@@ -422,15 +422,51 @@ def _create_server() -> Server:
     return server
 
 
+async def _watch_parent(interval: float = 5.0) -> None:
+    """Exit if the parent process dies (e.g. Claude Code closes).
+
+    Polls the parent PID periodically. When the parent is gone, forces exit
+    so the server doesn't linger as an orphaned process on Windows.
+
+    Args:
+        interval: Seconds between parent process checks.
+    """
+    import os
+    import signal
+
+    parent_pid = os.getppid()
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            # On Windows, os.kill with signal 0 checks if process exists
+            os.kill(parent_pid, 0)
+        except (OSError, ProcessLookupError):
+            # Parent is gone, exit immediately
+            os._exit(0)
+
+
 async def _run_server() -> None:
-    """Start the MCP server with stdio transport."""
+    """Start the MCP server with stdio transport and parent watchdog."""
     server = _create_server()
+
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            server.create_initialization_options(),
+        # Run server and parent watchdog concurrently
+        server_task = asyncio.create_task(
+            server.run(
+                read_stream,
+                write_stream,
+                server.create_initialization_options(),
+            )
         )
+        watchdog_task = asyncio.create_task(_watch_parent())
+
+        # When either finishes (server closes or parent dies), cancel the other
+        done, pending = await asyncio.wait(
+            [server_task, watchdog_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        for task in pending:
+            task.cancel()
 
 
 def main() -> None:
