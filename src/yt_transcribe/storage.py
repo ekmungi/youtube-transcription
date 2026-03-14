@@ -156,7 +156,8 @@ def find_existing(config: Config, video_id: str) -> Path | None:
         return None
 
     # Fast path: glob for files with video_id in filename
-    pattern = f"*[{video_id}]*.md"
+    # Escape brackets: [[] matches literal '[', []] matches literal ']'
+    pattern = f"*[[]{video_id}[]]*.md"
     matches = list(folder.rglob(pattern))
     if matches:
         return matches[0]

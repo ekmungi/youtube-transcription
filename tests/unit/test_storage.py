@@ -227,6 +227,27 @@ class TestFindExisting:
         md_files = list(folder.glob("*.md"))
         assert len(md_files) == 1
 
+    def test_does_not_false_match_on_character_class(self, tmp_path: Path):
+        """Glob pattern must not treat [video_id] as a character class.
+
+        Regression test: *[abc123]*.md was matching any file containing
+        any of the characters a,b,c,1,2,3 instead of the literal string [abc123].
+        """
+        config = _make_config(tmp_path)
+        folder = Path(config.obsidian_vault_path) / config.transcript_folder
+        folder.mkdir(parents=True)
+
+        # Create a file that does NOT contain the target video_id
+        other_file = folder / "Some Other Video [xyz789].md"
+        other_file.write_text(
+            '---\nvideo_id: "xyz789"\n---\nContent\n',
+            encoding="utf-8",
+        )
+
+        # Should NOT find xyz789 when searching for abc123
+        found = find_existing(config, "abc123")
+        assert found is None
+
     def test_finds_legacy_file_without_video_id_in_name(self, tmp_path: Path):
         """Falls back to frontmatter scan for files without [video_id] in name."""
         config = _make_config(tmp_path)
