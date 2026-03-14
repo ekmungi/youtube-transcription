@@ -171,16 +171,22 @@ class TestTranscribeVideoFastCloudStrategy:
         with pytest.raises(TranscriptionError, match="API key"):
             transcribe_video_fast(SAMPLE_VIDEO_DATA_NO_CAPTIONS, CLOUD_CONFIG)
 
+    @patch("yt_transcribe.transcribe.download")
     @patch("yt_transcribe.transcribe.assemblyai_engine")
     @patch("yt_transcribe.transcribe.get_assemblyai_api_key", return_value="test-key")
-    def test_raises_when_url_transcription_fails(
-        self, mock_get_key: MagicMock, mock_aai: MagicMock
+    def test_falls_back_to_file_upload_when_url_fails(
+        self, mock_get_key: MagicMock, mock_aai: MagicMock,
+        mock_download: MagicMock, tmp_path: Path,
     ):
-        """Cloud strategy raises when URL transcription fails (no fallback)."""
-        mock_aai.transcribe_url.side_effect = TranscriptionError("Failed")
+        """Cloud strategy falls back to file upload when URL transcription fails."""
+        mock_aai.transcribe_url.side_effect = TranscriptionError("Download error")
+        mock_download.download_audio.return_value = tmp_path / "audio.m4a"
+        mock_aai.transcribe.return_value = SAMPLE_SEGMENTS
 
-        with pytest.raises(TranscriptionError):
-            transcribe_video_fast(SAMPLE_VIDEO_DATA_NO_CAPTIONS, CLOUD_CONFIG)
+        result = transcribe_video_fast(SAMPLE_VIDEO_DATA_NO_CAPTIONS, CLOUD_CONFIG)
+
+        assert isinstance(result, Transcript)
+        mock_aai.transcribe.assert_called_once()  # fell back to file upload
 
 
 class TestTranscribeVideoFastLocalStrategy:

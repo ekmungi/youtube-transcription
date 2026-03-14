@@ -290,44 +290,55 @@ async def handle_check_job_status(job_id: str) -> dict[str, Any]:
 _TOOLS = (
     Tool(
         name="get_transcript",
-        description="Transcribe a YouTube video and save to Obsidian vault",
+        description=(
+            "Transcribe a YouTube video and save to Obsidian vault. "
+            "IMPORTANT: Always ask the user which strategy to use before calling this tool. "
+            "Options: 'captions' (free, instant, uses YouTube's own subtitles), "
+            "'cloud' (fast, uses AssemblyAI, requires API key), "
+            "'local' (free, slow, uses Whisper on CPU), "
+            "'auto' (tries captions first, then cloud, then local)."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "video_url": {"type": "string", "description": "YouTube video URL"},
                 "strategy": {
                     "type": "string",
-                    "description": "Transcription strategy override: auto, captions, cloud, local",
+                    "description": "Transcription strategy. Ask the user which to use: captions (free/instant), cloud (fast/paid), local (free/slow), auto (cascading fallback)",
                     "enum": ["auto", "captions", "cloud", "local"],
                 },
                 "whisper_model": {
                     "type": "string",
-                    "description": "Whisper model size override (for local strategy): tiny, base, small, medium",
+                    "description": "Whisper model size (only for local strategy): tiny, base, small, medium",
                     "enum": ["tiny", "base", "small", "medium"],
                 },
             },
-            "required": ["video_url"],
+            "required": ["video_url", "strategy"],
         },
     ),
     Tool(
         name="get_playlist_transcripts",
-        description="Transcribe all videos in a YouTube playlist",
+        description=(
+            "Transcribe all videos in a YouTube playlist. "
+            "IMPORTANT: Always ask the user which strategy to use before calling this tool. "
+            "Options: 'captions', 'cloud', 'local', 'auto'."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "playlist_url": {"type": "string", "description": "YouTube playlist URL"},
                 "strategy": {
                     "type": "string",
-                    "description": "Transcription strategy override: auto, captions, cloud, local",
+                    "description": "Transcription strategy. Ask the user which to use: captions (free/instant), cloud (fast/paid), local (free/slow), auto (cascading fallback)",
                     "enum": ["auto", "captions", "cloud", "local"],
                 },
                 "whisper_model": {
                     "type": "string",
-                    "description": "Whisper model size override (for local strategy): tiny, base, small, medium",
+                    "description": "Whisper model size (only for local strategy): tiny, base, small, medium",
                     "enum": ["tiny", "base", "small", "medium"],
                 },
             },
-            "required": ["playlist_url"],
+            "required": ["playlist_url", "strategy"],
         },
     ),
     Tool(

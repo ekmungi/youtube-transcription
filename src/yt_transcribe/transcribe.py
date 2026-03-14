@@ -76,10 +76,10 @@ def transcribe_video_fast(
                 text = _format_text(segments)
                 return Transcript(video=video_info, text=text, segments=segments)
             except TranscriptionError:
-                if strategy == TranscriptionStrategy.CLOUD:
-                    raise
+                # URL transcription often fails because YouTube CDN URLs are
+                # signed/IP-restricted/time-limited. Fall back to file upload.
                 logger.warning(
-                    "AssemblyAI URL transcription failed for %s, trying file upload",
+                    "AssemblyAI URL transcription failed for %s, falling back to file upload",
                     video_info.url,
                 )
 
